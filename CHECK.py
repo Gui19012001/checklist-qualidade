@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import os
+from io import BytesIO
 
 # Lista de itens a verificar
 itens = ["Etiqueta", "Tambor + Parafuso", "Solda", "Pintura", "Borracha ABS"]
@@ -41,7 +42,9 @@ def salvar_checklist(serie, resultados, usuario, foto_etiqueta=None, reinspecao=
         df_existente = pd.read_excel(ARQUIVO_DIARIO)
         if not reinspecao and serie in df_existente["Nº Série"].unique():
             st.error("⚠️ INVÁLIDO! DUPLICIDADE – Este Nº de Série já foi inspecionado.")
-            return
+            return None, None
+    else:
+        df_existente = pd.DataFrame()
 
     dados = []
     reprovado = any(info['status'] == "Não Conforme" for info in resultados.values())
@@ -68,13 +71,15 @@ def salvar_checklist(serie, resultados, usuario, foto_etiqueta=None, reinspecao=
 
     df_novo = pd.DataFrame(dados)
 
-    if os.path.exists(ARQUIVO_DIARIO):
+    if not df_existente.empty:
         df_final = pd.concat([df_existente, df_novo], ignore_index=True)
     else:
         df_final = df_novo
 
     df_final.to_excel(ARQUIVO_DIARIO, index=False)
     st.success(f"Checklist salvo para o Nº de Série {serie}")
+
+    return df_final, ARQUIVO_DIARIO
 
 def mostrar_resumo():
     if os.path.exists(ARQUIVO_DIARIO):
@@ -120,7 +125,23 @@ def novo_checklist():
         elif foto_etiqueta is None:
             st.error("⚠️ É obrigatório tirar foto da Etiqueta!")
         else:
-            salvar_checklist(serie, resultados, st.session_state['usuario'], foto_etiqueta=foto_etiqueta)
+            df_final, arquivo = salvar_checklist(serie, resultados, st.session_state['usuario'], foto_etiqueta=foto_etiqueta)
+
+            if df_final is not None:
+                # Gerar arquivo para download
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_final.to_excel(writer, index=False)
+                output.seek(0)
+
+                nome_arquivo = f"Checklist_{datetime.date.today().strftime('%Y%m%d')}_{serie}.xlsx"
+
+                st.download_button(
+                    label="📥 Baixar checklist salvo agora",
+                    data=output.getvalue(),
+                    file_name=nome_arquivo,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 def reinspecao():
     if os.path.exists(ARQUIVO_DIARIO):
@@ -140,7 +161,22 @@ def reinspecao():
                     resultados[item] = {"status": status, "obs": obs}
 
                 if st.button("Salvar Reinspeção"):
-                    salvar_checklist(serie_sel, resultados, st.session_state['usuario'], reinspecao=True)
+                    df_final, _ = salvar_checklist(serie_sel, resultados, st.session_state['usuario'], reinspecao=True)
+
+                    if df_final is not None:
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            df_final.to_excel(writer, index=False)
+                        output.seek(0)
+
+                        nome_arquivo = f"Reinspecao_{datetime.date.today().strftime('%Y%m%d')}_{serie_sel}.xlsx"
+
+                        st.download_button(
+                            label="📥 Baixar reinspeção salva agora",
+                            data=output.getvalue(),
+                            file_name=nome_arquivo,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
         else:
             st.info("Nenhum produto reprovado para reinspeção.")
     else:
@@ -167,4 +203,3 @@ else:
 
     with tab3:
         reinspecao()
-
